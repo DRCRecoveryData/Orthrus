@@ -15,12 +15,12 @@
 # coding=utf-8
 
 import argparse
-import cStringIO
 import datetime
-import FileValidators
 import re
 import os
+import io
 
+import FileValidators  # Ensure this module is compatible with Python 3
 
 # A few constants:
 DEBUG_BENCHMARK = True
@@ -43,10 +43,10 @@ CONST_SECTORSIZE = 512
 
 # And now some variables:
 headers_list = [
-    '\xff\xd8\xff',
-    '\x89\x50\x4e\x47\x0d\x0a\x1a\x0a',
-    '\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1',
-    'GIF8',
+    b'\xff\xd8\xff',
+    b'\x89\x50\x4e\x47\x0d\x0a\x1a\x0a',
+    b'\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1',
+    b'GIF8',
 ]
 
 
@@ -61,155 +61,138 @@ def Carve(args):
     blocksize = CONST_BLOCKSIZE
     filesize = CONST_FILESIZE
     sectorsize = CONST_SECTORSIZE
-    headers = map(re.escape, headers_list)
-    rex_heads = re.compile("|".join(headers))
+    headers = list(map(re.escape, headers_list))
+    rex_heads = re.compile(b"|".join(headers))
+    
     validators = {
-        '\xff\xd8\xff': FileValidators.JPGValidator(),
-        '\x89\x50\x4e\x47\x0d\x0a\x1a\x0a': FileValidators.PNGValidator(),
-        '\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1': FileValidators.MSOLEValidator(),
-        'GIF8': FileValidators.GIFValidator(),
+        b'\xff\xd8\xff': FileValidators.JPGValidator(),
+        b'\x89\x50\x4e\x47\x0d\x0a\x1a\x0a': FileValidators.PNGValidator(),
+        b'\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1': FileValidators.MSOLEValidator(),
+        b'GIF8': FileValidators.GIFValidator(),
     }
+    
     extensions = {
-        '\xff\xd8\xff': ".jpg",
-        '\x89\x50\x4e\x47\x0d\x0a\x1a\x0a': ".png",
-        '\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1': ".doc",
-        'GIF8': ".gif",
+        b'\xff\xd8\xff': ".jpg",
+        b'\x89\x50\x4e\x47\x0d\x0a\x1a\x0a': ".png",
+        b'\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1': ".doc",
+        b'GIF8': ".gif",
     }
-    sois = {  # Structures of Interest, it's a list that gets compiled into a regex that helps the
-              # carver determine the gap end position.
-        '\xff\xd8\xff': ['\xff\xc0', '\xff\xc1', '\xff\xc2', '\xff\xc3', '\xff\xc4', '\xff\xc5',
-            '\xff\xc6', '\xff\xc7', '\xff\xc8', '\xff\xc9', '\xff\xca', '\xff\xcb', '\xff\xcc',
-            '\xff\xcd', '\xff\xce', '\xff\xcf', '\xff\xd0', '\xff\xd1', '\xff\xd2', '\xff\xd3',
-            '\xff\xd4', '\xff\xd5', '\xff\xd6', '\xff\xd7', '\xff\xd9', '\xff\xda', '\xff\xdb',
-            '\xff\xdc', '\xff\xdd', '\xff\xde', '\xff\xdf', '\xff\xe0', '\xff\xe1', '\xff\xe2',
-            '\xff\xe3', '\xff\xe4', '\xff\xe5', '\xff\xe6', '\xff\xe7', '\xff\xe8', '\xff\xe9',
-            '\xff\xea', '\xff\xeb', '\xff\xec', '\xff\xed', '\xff\xee', '\xff\xef', '\xff\xf0',
-            '\xff\xf1', '\xff\xf2', '\xff\xf3', '\xff\xf4', '\xff\xf5', '\xff\xf6', '\xff\xf7',
-            '\xff\xf8', '\xff\xf9', '\xff\xfa', '\xff\xfb', '\xff\xfc', '\xff\xfd', '\xff\xfe'
-        ],  # this is a list of all the valid jpeg markers
-        '\x89\x50\x4e\x47\x0d\x0a\x1a\x0a': ["PLTE", "IDAT", "IEND", "bKGD", "cHRM", "gAMA", "hIST",
-            "iCCP", "iTXt", "pHYs", "sBIT", "sPLT", "sRGB", "sTER", "tEXt", "tIME", "tRNS", "zTXt"
-        ],  # this is a list of all the standard PNG segments that could be found
-        '\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1': [],  # there's really no structure that we should/could
-        # look for regarding MS-OLE files, so we have to return to a standard size
-        'GIF8': [',', ';', '\x21\xf9', '\x21\x01', '\x21\xff', '\x21\xfe'
-        ],  # this covers all possible GIF blocks
-    }
-    # now we have to compile those lists and store the regex(s)
-    rex_sois = {}
-    for k in sois:
-        values = map(re.escape, sois[k])
-        rex_sois[k] = re.compile("|".join(values))
 
+    sois = {  
+        b'\xff\xd8\xff': [
+            b'\xff\xc0', b'\xff\xc1', b'\xff\xc2', b'\xff\xc3', b'\xff\xc4', b'\xff\xc5',
+            b'\xff\xc6', b'\xff\xc7', b'\xff\xc8', b'\xffxc9', b'\xff\xca', b'\xff\xcb',
+            b'\xff\xcc', b'\xff\xcd', b'\xff\xce', b'\xff\xcf', b'\xff\xd0', b'\xff\xd1',
+            b'\xff\xd2', b'\xff\xd3', b'\xff\xd4', b'\xff\xd5', b'\xff\xd6', b'\xff\xd7',
+            b'\xff\xd9', b'\xff\xda', b'\xff\xdb', b'\xff\xdc', b'\xff\xdd', b'\xff\xde',
+            b'\xff\xdf'
+        ],
+        b'\x89\x50\x4e\x47\x0d\x0a\x1a\x0a': [b"PLTE", b"IDAT", b"IEND"],
+        b'\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1': [],
+        b'GIF8': [b',', b';', b'\x21\xf9', b'\x21\x01', b'\x21\xff', b'\x21\xfe'],
+    }
+    
+    rex_sois = {k: re.compile(b"|".join(map(re.escape, v))) for k, v in sois.items()}
+    
     image = open(args.ipath, "rb")
     os.mkdir(args.opath)
-    ostring = args.opath + os.path.sep + "%08d%s"
+    ostring = os.path.join(args.opath, "%08d%s")
+    
     ext_number = 1
     block = image.read(blocksize)
-    readbytes = 0
+    
     while block:
-        readbytes = float(len(block)) / MEGA
-        print "-> %0.2f MB read" % readbytes
+        print("-> %0.2f MB read" % (len(block) / MEGA))
+        
         newblock = image.read(blocksize)
         bigblock = block + newblock
         match_results = rex_heads.finditer(block)
+        
         for match in match_results:
             offset = match.start()
             head = match.group()
             val = validators[head]
             data = bigblock[offset: offset + filesize]
-            #obj = cStringIO.StringIO(data)
-            print "Testing %s at %d..." % (head.encode("hex"), offset)
+            print("Testing %s at %d..." % (head.hex(), offset))
+            
             valid = val.Validate(data)
-            if valid:
-                extract = True
-            else:
-                extract = False
+            extract = valid
+            
+            if not valid:
                 lvb = val.GetStatus()[2]  # last valid byte
-                gap_start = (lvb / sectorsize) + 1
-                gap_end = (filesize / sectorsize) - 1
+                gap_start = (lvb // sectorsize) + 1
+                gap_end = (filesize // sectorsize) - 1
+                
                 if sois[head]:
                     rx = rex_sois[head]
                     end_match = rx.search(data[gap_start * sectorsize:])
                     if end_match:
-                        gap_end = gap_start + (end_match.start() / sectorsize)
-                        # lets try to broaden the spectrum and look for another SOI
+                        gap_end = gap_start + (end_match.start() // sectorsize)
                         new_match = rx.search(data[(gap_end + 1) * sectorsize:])
                         if new_match:
                             gap_old = gap_end
-                            gap_end = gap_start + (new_match.start() / sectorsize)
-                            print "  got a new match, old(%d), new(%d)" % (gap_old, gap_end)
+                            gap_end = gap_start + (new_match.start() // sectorsize)
+                            print("  got a new match, old(%d), new(%d)" % (gap_old, gap_end))
                     else:
                         continue
                 else:
-                    gap_end = (filesize / sectorsize) - 1
-                gap_size_start = 1
-                print "  file not valid, trying gaps... (head: %s)" % (head.encode("hex"))
-                for gap_pos in xrange(gap_start, gap_end):
-                    print "\r    gaps starting from %d..." % (gap_pos),
-                    gap_size_end = gap_end - gap_pos
-                    print "possible gap size: %d... " % (gap_size_end),
-                    gap_size_end = min((2048, gap_size_end))
-                    #for gap_size in xrange(gap_size_start, gap_size_end):
-                    for gap_size in xrange(gap_size_end - 1, 0, -1):
-                        #print "\bx",
+                    gap_end = (filesize // sectorsize) - 1
+                
+                print("  file not valid, trying gaps... (head: %s)" % (head.hex()))
+                
+                for gap_pos in range(gap_start, gap_end):
+                    print("\r    gaps starting from %d..." % (gap_pos), end="")
+                    gap_size_end = min(2048, gap_end - gap_pos)
+                    
+                    for gap_size in range(gap_size_end - 1, 0, -1):
                         pos1 = gap_pos * sectorsize
                         pos2 = (gap_pos + gap_size) * sectorsize
                         newdata = data[:pos1] + data[pos2:]
-                        #new_obj = cStringIO.StringIO(newdata)
+                        
                         if val.Validate(newdata):
                             extract = True
                             data = newdata
-                            print "... validated with gap %d to %d!" % (gap_pos, gap_pos + gap_size)
+                            print("... validated with gap %d to %d!" % (gap_pos, gap_pos + gap_size))
                             break
                     if extract:
                         break
+            
             if extract:
                 extension = extensions[head]
                 ext_size = val.GetStatus()[2]
-                print "  extracted to %s, %d bytes" % (ostring % (ext_number, extension), ext_size)
-                fo = open(ostring % (ext_number, extension), "wb")
-                fo.write(data[:ext_size])
-                fo.close()
+                print("  extracted to %s, %d bytes" % (ostring % (ext_number, extension), ext_size))
+                
+                with open(ostring % (ext_number, extension), "wb") as fo:
+                    fo.write(data[:ext_size])
                 ext_number += 1
+        
         block = newblock
+    
     image.close()
 
 
 def ArgParse():
-    """
-    Parses the command line arguments
-
-    :return: argparse dictionary
-    """
-    # parse command line arguments
-    parser = argparse.ArgumentParser(
-        description="orthrus: performs bifragment-gap-carving on a disk image.")
-    parser.add_argument("ipath",
-                        help="Input path.")
-    parser.add_argument("opath",
-                        help="Output path.")
-    parser.add_argument("-l",
-                        dest="logfile",
-                        default="orthrus-log.md",
-                        help="Log file.")
-    args = parser.parse_args()
-    return args
+    parser = argparse.ArgumentParser(description="orthrus: performs bifragment-gap-carving on a disk image.")
+    parser.add_argument("ipath", help="Input path.")
+    parser.add_argument("opath", help="Output path.")
+    parser.add_argument("-l", dest="logfile", default="orthrus-log.md", help="Log file.")
+    return parser.parse_args()
 
 
 def main():
-    print CONST_BANNER
+    print(CONST_BANNER)
     args = ArgParse()
     t1 = datetime.datetime.now()
-
+    
     if os.path.isfile(args.ipath) and not os.path.exists(args.opath):
         Carve(args)
     else:
-        print "ipath argument must be a valid file!"
-        print "opath argument must be a non-existent directory!"
+        print("ipath argument must be a valid file!")
+        print("opath argument must be a non-existent directory!")
+    
     dt = datetime.datetime.now() - t1
     if DEBUG_BENCHMARK:
-        print "\nTime taken: %s" % dt
+        print("\nTime taken: %s" % dt)
 
 
 if __name__ == "__main__":
